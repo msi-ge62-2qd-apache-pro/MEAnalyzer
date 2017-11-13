@@ -6,7 +6,7 @@ Intel Engine Firmware Analysis Tool
 Copyright (C) 2014-2017 Plato Mavropoulos
 """
 
-title = 'ME Analyzer v1.32.1_1'
+title = 'ME Analyzer v1.33.0'
 
 import os
 import re
@@ -35,9 +35,10 @@ col_m = colorama.Fore.MAGENTA + colorama.Style.BRIGHT
 col_e = colorama.Fore.RESET + colorama.Style.RESET_ALL
 
 # Import Huffman11 by IllegalArgument
+# https://github.com/IllegalArgument/Huffman11
 try :
 	sys.dont_write_bytecode = True
-	import huffman11 # https://github.com/IllegalArgument/Huffman11
+	from Huffman11 import huffman11 # Initialize Git Submodule
 	sys.dont_write_bytecode = False
 	huff11_exist = True
 except :
@@ -78,17 +79,17 @@ def mea_help() :
 	text += "-check  : Copies files with messages to check\n"
 	text += "-mass   : Scans all files of a given directory\n"
 	text += "-enuf   : Enables UEFIFind Engine GUID detection\n"
+	text += "-adir   : Sets UEFIFind to the previous directory\n"
 	text += "-pdb    : Writes input file DB entry to text file\n"
-	text += "-dbname : Renames input file based on DB name\n"
-	text += "-dfpt   : Shows info about the $FPT and/or BPDT headers (Research)\n"
-	text += "-dsku   : Shows debug/verbose SKU detection info for CSE ME 11 (Research)\n"
+	text += "-dbname : Renames input file based on unique DB name\n"
+	text += "-dfpt   : Shows info about the FPT and/or BPDT headers (Research)\n"
+	text += "-dsku   : Shows debug/verbose SKU detection info for CSME 11 (Research)\n"
 	text += "-unp86  : Unpacks all CSE Converged Security Engine firmware (Research)\n"
-	text += "-ext86  : Prints Extension info at CSE unpacking (Research)\n"
-	text += "-bug86  : Enables debug/verbose mode at CSE unpacking (Research)"
+	text += "-ext86  : Prints Extension info during CSE unpacking (Research)\n"
+	text += "-bug86  : Enables debug/verbose mode during CSE unpacking (Research)"
 	
 	if mea_os == 'win32' :
-		text += "\n-adir   : Sets UEFIFind to the previous directory\n"
-		text += "-extr   : Lordkag's UEFIStrip mode\n"
+		text += "\n-extr   : Lordkag's UEFIStrip mode\n"
 		text += "-msg    : Prints only messages without headers\n"
 		text += "-hid    : Displays all firmware even without messages (-msg)"
 	
@@ -102,7 +103,7 @@ class MEA_Param :
 	
 		self.all = ['-?','-skip','-check','-extr','-msg','-hid','-adir','-unp86','-ext86','-bug86','-dsku','-pdb','-enuf','-dbname','-mass','-dfpt']
 
-		self.win = ['-extr','-msg','-hid','-adir'] # Windows only
+		self.win = ['-extr','-msg','-hid'] # Windows only
 		
 		if mea_os == 'win32' : self.val = self.all
 		else : self.val = [item for item in self.all if item not in self.win]
@@ -137,9 +138,9 @@ class MEA_Param :
 			if i == '-dbname' : self.give_db_name = True
 			if i == '-mass' : self.mass_scan = True
 			if i == '-dfpt' : self.fpt_disp = True
+			if i == '-adir' : self.alt_dir = True
 			
 			if mea_os == 'win32' : # Windows only options
-				if i == '-adir' : self.alt_dir = True
 				if i == '-extr' : self.extr_mea = True
 				if i == '-msg' : self.print_msg = True
 				if i == '-hid' : self.hid_find = True
@@ -832,7 +833,7 @@ class CSE_Ext_03(ctypes.LittleEndianStructure) : # Partition Information (MANIFE
 		("InstanceID", 		uint32_t),  	# 0x3C
 		("Flags", 			uint32_t),  	# 0x40 Support multiple instances Y/N (for independently updated WCOD/LOCL partitions with multiple instances)
 		("Reserved", 		uint32_t*4),  	# 0x44
-		("Unknown", 		uint32_t),  	# 0x54 Unknown (>= 11.6.0.1109, 1 SPS, 3 ME)
+		("Unknown", 		uint32_t),  	# 0x54 Unknown (>= 11.6.0.1109, 1 CSSPS, 3 CSME)
 		# 0x58
 	]
 	
@@ -1333,7 +1334,7 @@ class CSE_Ext_0C(ctypes.LittleEndianStructure) : # Client System Information (CL
 		pt.add_row(['SKU Capabilities', '0x%X' % self.FWSKUCaps])
 		pt.add_row(['SKU Capabilities Reserved', 'FF * 28' if FWSKUCapsReserv == 'FF' * 28 else '%s' % FWSKUCapsReserv])
 		pt.add_row(['CSE Size', '0x%X' % f1])
-		pt.add_row(['SKU Type', ['Corporate','Consumer','Slim','SPS'][f2]])
+		pt.add_row(['SKU Type', ['Corporate','Consumer','Slim','LBG'][f2]])
 		pt.add_row(['Lewisburg', fvalue[f3]])
 		pt.add_row(['M3', fvalue[f4]])
 		pt.add_row(['M0', fvalue[f5]])
@@ -1353,7 +1354,7 @@ class CSE_Ext_0C(ctypes.LittleEndianStructure) : # Client System Information (CL
 class CSE_Ext_0C_FWSKUAttrib(ctypes.LittleEndianStructure):
 	_fields_ = [
 		('CSESize', uint64_t, 4), # CSESize * 0.5MB, always 0
-		('SKUType', uint64_t, 3), # 0 COR, 1 CON, 2 SLM, 3 SPS
+		('SKUType', uint64_t, 3), # 0 COR, 1 CON, 2 SLM, 3 LBG (?)
 		('Lewisburg', uint64_t, 1), # 0 11.x, 1 11.20
 		('M3', uint64_t, 1), # 0 CON & SLM, 1 COR
 		('M0', uint64_t, 1), # 1 CON & SLM & COR
@@ -3504,9 +3505,9 @@ def mea_exit(code=0) :
 # Huffman11 not found
 def huff11_404() :
 	if param.me11_mod_extr :
-		print(col_r + '\n    Failed to import Huffman11 by IllegalArgument, huffman11.py not found!' + col_e)
+		print(col_r + '\n    Failed to import Huffman11 by IllegalArgument!' + col_e)
 	else :
-		gen_msg(err_stor, col_r + 'Error: Failed to import Huffman11 by IllegalArgument, huffman11.py not found!' + col_e, 'unp')
+		gen_msg(err_stor, col_r + 'Error: Failed to import Huffman11 by IllegalArgument!' + col_e, 'unp')
 
 # Calculate SHA1 hash of data
 def sha_1(data) :
@@ -3824,6 +3825,65 @@ def krod_fit_sku(start_sku_match) :
 	
 	return sku_check
 
+# FIT Platform for CSME 11
+def fit_11_plat(sku_check, fit_platform, me11_sku_ranges) :
+	if sku_check != 'NaN' :
+		
+		while fit_platform == 'NaN' :
+		
+			# 3rd byte of 1st pattern is SKU Category from 0+ (ex: 91 01 04 80 00 --> 5th, 91 01 03 80 00 --> 4th)
+			if any(s in sku_check for s in (' 2C 01 03 80 00 ',' 02 D1 02 2C ')) : fit_platform = 'PCH-H No Emulation KBL'
+			elif any(s in sku_check for s in (' 2D 01 03 80 00 ',' 02 D1 02 2D ')) : fit_platform = 'PCH-H Q270'
+			elif any(s in sku_check for s in (' 2E 01 03 80 00 ',' 02 D1 02 2E ')) : fit_platform = 'PCH-H Q250'
+			elif any(s in sku_check for s in (' 2F 01 03 80 00 ',' 02 D1 02 2F ')) : fit_platform = 'PCH-H B250'
+			elif any(s in sku_check for s in (' 30 01 03 80 00 ',' 02 D1 02 30 ')) : fit_platform = 'PCH-H H270'
+			elif any(s in sku_check for s in (' 31 01 03 80 00 ',' 02 D1 02 31 ')) : fit_platform = 'PCH-H Z270'
+			elif any(s in sku_check for s in (' 32 01 01 80 00 ',' 02 D1 02 32 ')) : fit_platform = 'PCH-H QMU185'
+			elif any(s in sku_check for s in (' 64 00 01 80 00 ',' 02 D1 02 64 ')) : fit_platform = 'PCH-H Q170'
+			elif any(s in sku_check for s in (' 65 00 01 80 00 ',' 02 D1 02 65 ')) : fit_platform = 'PCH-H Q150'
+			elif any(s in sku_check for s in (' 66 00 01 80 00 ',' 02 D1 02 66 ')) : fit_platform = 'PCH-H B150'
+			elif any(s in sku_check for s in (' 67 00 01 80 00 ',' 02 D1 02 67 ')) : fit_platform = 'PCH-H H170'
+			elif any(s in sku_check for s in (' 68 00 01 80 00 ',' 02 D1 02 68 ')) : fit_platform = 'PCH-H Z170'
+			elif any(s in sku_check for s in (' 69 00 01 80 00 ',' 02 D1 02 69 ')) : fit_platform = 'PCH-H H110'
+			elif any(s in sku_check for s in (' 6A 00 01 80 00 ',' 02 D1 02 6A ')) : fit_platform = 'PCH-H QM170'
+			elif any(s in sku_check for s in (' 6B 00 01 80 00 ',' 02 D1 02 6B ')) : fit_platform = 'PCH-H HM170'
+			elif any(s in sku_check for s in (' 6C 00 01 80 00 ',' 02 D1 02 6C ')) : fit_platform = 'PCH-H No Emulation SKL'
+			elif any(s in sku_check for s in (' 6D 00 01 80 00 ',' 02 D1 02 6D ')) : fit_platform = 'PCH-H C236'
+			elif any(s in sku_check for s in (' 6E 00 01 80 00 ',' 02 D1 02 6E ')) : fit_platform = 'PCH-H CM236'
+			elif any(s in sku_check for s in (' 6F 00 01 80 00 ',' 02 D1 02 6F ')) : fit_platform = 'PCH-H C232'
+			elif any(s in sku_check for s in (' 70 00 01 80 00 ',' 02 D1 02 70 ')) : fit_platform = 'PCH-H QMS180'
+			elif any(s in sku_check for s in (' 71 00 01 80 00 ',' 02 D1 02 71 ')) : fit_platform = 'PCH-H QMS185'
+			elif any(s in sku_check for s in (' 90 01 04 80 00 ',' 02 D1 02 90 ')) : fit_platform = 'PCH-H No Emulation BSF'
+			elif any(s in sku_check for s in (' 91 01 04 80 00 ',' 91 01 03 80 00 ',' 02 D1 02 91 ')) : fit_platform = 'PCH-H C422' # moved at 11.7
+			elif any(s in sku_check for s in (' 92 01 04 80 00 ',' 92 01 03 80 00 ',' 02 D1 02 92 ')) : fit_platform = 'PCH-H X299' # moved at 11.7
+			elif any(s in sku_check for s in (' 93 01 01 80 00 ',' 02 D1 02 93 ')) : fit_platform = 'PCH-H QM175'
+			elif any(s in sku_check for s in (' 94 01 01 80 00 ',' 02 D1 02 94 ')) : fit_platform = 'PCH-H HM175'
+			elif any(s in sku_check for s in (' 95 01 01 80 00 ',' 02 D1 02 95 ')) : fit_platform = 'PCH-H CM238'
+			elif any(s in sku_check for s in (' C8 00 02 80 00 ',' 04 11 06 C8 ')) : fit_platform = 'PCH-H C621'
+			elif any(s in sku_check for s in (' C9 00 02 80 00 ',' 04 11 06 C9 ')) : fit_platform = 'PCH-H C622'
+			elif any(s in sku_check for s in (' CA 00 02 80 00 ',' 04 11 06 CA ')) : fit_platform = 'PCH-H C624'
+			elif any(s in sku_check for s in (' CB 00 02 80 00 ',' 04 11 06 CB ')) : fit_platform = 'PCH-H No Emulation LBG'
+			elif any(s in sku_check for s in (' F4 01 05 80 00 ',' 02 D1 02 F4 ')) : fit_platform = 'PCH-H No Emulation Z370'
+			elif any(s in sku_check for s in (' F5 01 05 80 00 ',' 02 D1 02 F5 ')) : fit_platform = 'PCH-H Z370'
+			elif any(s in sku_check for s in (' 01 00 00 80 00 ',' 02 B0 02 01 ',' 02 D0 02 01 ')) : fit_platform = 'PCH-LP Premium U SKL'
+			elif any(s in sku_check for s in (' 02 00 00 80 00 ',' 02 B0 02 02 ',' 02 D0 02 02 ')) : fit_platform = 'PCH-LP Premium Y SKL'
+			elif any(s in sku_check for s in (' 03 00 00 80 00 ',' 02 B0 02 03 ',' 02 D0 02 03 ')) : fit_platform = 'PCH-LP No Emulation'
+			elif any(s in sku_check for s in (' 04 00 00 80 00 ',' 02 B0 02 04 ',' 02 D0 02 04 ')) : fit_platform = 'PCH-LP Base U KBL'
+			elif any(s in sku_check for s in (' 05 00 00 80 00 ',' 02 B0 02 05 ',' 02 D0 02 05 ')) : fit_platform = 'PCH-LP Premium U KBL'
+			elif any(s in sku_check for s in (' 06 00 00 80 00 ',' 02 B0 02 06 ',' 02 D0 02 06 ')) : fit_platform = 'PCH-LP Premium Y KBL'
+			elif any(s in sku_check for s in (' 07 00 00 80 00 ',' 02 B0 02 07 ',' 02 D0 02 07 ')) : fit_platform = 'PCH-LP Base U KBL-R'
+			elif any(s in sku_check for s in (' 08 00 00 80 00 ',' 02 B0 02 08 ',' 02 D0 02 08 ')) : fit_platform = 'PCH-LP Premium U KBL-R'
+			elif any(s in sku_check for s in (' 09 00 00 80 00 ',' 02 B0 02 09 ',' 02 D0 02 09 ')) : fit_platform = 'PCH-LP Premium Y KBL-R'
+			elif any(s in sku_check for s in (' 02 B0 02 00 ',' 02 D0 02 00 ')) : fit_platform = 'PCH-LP Base U SKL' # last, weak pattern
+			elif me11_sku_ranges :
+				(start_sku_match, end_sku_match) = me11_sku_ranges[-1] # Take last SKU range
+				sku_check = krod_fit_sku(start_sku_match) # Store the new SKU check bytes
+				me11_sku_ranges.pop(-1) # Remove last SKU range
+				continue # Invoke while, check fit_platform in new sku_check
+			else : break # Could not find FIT SKU at any KROD
+			
+	return fit_platform
+	
 # Search DB for manual Engine CSE values
 def db_skl(variant) :
 	fw_db = db_open()
@@ -4338,9 +4398,10 @@ for file_in in source :
 							
 							s_p_type = s_bpdt_entry.Type
 							s_p_offset = s_bpdt_entry.Offset
+							s_p_offset_spi = start_fw_start_match + s_p_offset
 							s_p_size = s_bpdt_entry.Size
 							
-							if p_offset in [4294967295, 0] or p_size in [4294967295, 0] or reading[p_offset_spi:p_offset_spi + p_size] == p_size * b'\xFF' :
+							if s_p_offset in [4294967295, 0] or s_p_size in [4294967295, 0] or reading[s_p_offset_spi:s_p_offset_spi + s_p_size] == s_p_size * b'\xFF' :
 								s_p_empty = 'Yes'
 							else :
 								s_p_empty = 'No'
@@ -4359,7 +4420,7 @@ for file_in in source :
 							
 							# Store all BPDT Entries for extraction
 							if param.me11_mod_extr :
-								bpdt_part_all.append([s_p_name, p_offset_spi, p_offset_spi + s_p_size, s_p_type, s_p_empty, 'Secondary'])
+								bpdt_part_all.append([s_p_name, s_p_offset_spi, s_p_offset_spi + s_p_size, s_p_type, s_p_empty, 'Secondary'])
 								
 							s_bpdt_step += 0xC # 0xC BPDT Entry size
 					
@@ -4402,7 +4463,8 @@ for file_in in source :
 				
 				# Detect if $FPT is proceeded by CSME 12+ TBD Header
 				tbd_hdr_off = start_fw_start_match - 0x1000 # TBD size is 0x1000
-				if start_fw_start_match == tbd_hdr_off + int.from_bytes(reading[tbd_hdr_off + 0x10:tbd_hdr_off + 0x14], 'little') :
+				if start_fw_start_match == tbd_hdr_off + int.from_bytes(reading[tbd_hdr_off + 0x10:tbd_hdr_off + 0x14], 'little') and \
+				reading[tbd_hdr_off:tbd_hdr_off + 0x10] == b'\xFF' * 16 :
 					tbd_exist = True
 					tbd_size = 0x1000
 					
@@ -4492,7 +4554,7 @@ for file_in in source :
 					if p_name in [b'\xFF\xFF\xFF\xFF', b''] :
 						p_name = '' # If appears, wrong NumPartitions
 						fpt_num_diff -= 1 # Check for less $FPT Entries
-					elif p_name == b'\xE0\x15': p_name = '' # ME8 (E0150020)
+					elif p_name == b'\xE0\x15' : p_name = '' # ME8 (E0150020)
 					else : p_name = p_name.decode('utf-8', 'ignore')
 					
 					if param.fpt_disp :
@@ -5617,61 +5679,8 @@ for file_in in source :
 					else :
 						huff11_404()
 				
-				# FIT Platform SKU for all 11.x
-				if sku_check != 'NaN' :
-					
-					while fit_platform == 'NaN' :
-						
-						# 3rd byte of 1st pattern is SKU Category from 0+ (ex: 91 01 04 80 00 --> 5th, 91 01 03 80 00 --> 4th)
-						if any(s in sku_check for s in (' 2C 01 03 80 00 ',' 02 D1 02 2C ')) : fit_platform = 'PCH-H No Emulation KBL'
-						elif any(s in sku_check for s in (' 2D 01 03 80 00 ',' 02 D1 02 2D ')) : fit_platform = 'PCH-H Q270'
-						elif any(s in sku_check for s in (' 2E 01 03 80 00 ',' 02 D1 02 2E ')) : fit_platform = 'PCH-H Q250'
-						elif any(s in sku_check for s in (' 2F 01 03 80 00 ',' 02 D1 02 2F ')) : fit_platform = 'PCH-H B250'
-						elif any(s in sku_check for s in (' 30 01 03 80 00 ',' 02 D1 02 30 ')) : fit_platform = 'PCH-H H270'
-						elif any(s in sku_check for s in (' 31 01 03 80 00 ',' 02 D1 02 31 ')) : fit_platform = 'PCH-H Z270'
-						elif any(s in sku_check for s in (' 32 01 01 80 00 ',' 02 D1 02 32 ')) : fit_platform = 'PCH-H QMU185'
-						elif any(s in sku_check for s in (' 64 00 01 80 00 ',' 02 D1 02 64 ')) : fit_platform = 'PCH-H Q170'
-						elif any(s in sku_check for s in (' 65 00 01 80 00 ',' 02 D1 02 65 ')) : fit_platform = 'PCH-H Q150'
-						elif any(s in sku_check for s in (' 66 00 01 80 00 ',' 02 D1 02 66 ')) : fit_platform = 'PCH-H B150'
-						elif any(s in sku_check for s in (' 67 00 01 80 00 ',' 02 D1 02 67 ')) : fit_platform = 'PCH-H H170'
-						elif any(s in sku_check for s in (' 68 00 01 80 00 ',' 02 D1 02 68 ')) : fit_platform = 'PCH-H Z170'
-						elif any(s in sku_check for s in (' 69 00 01 80 00 ',' 02 D1 02 69 ')) : fit_platform = 'PCH-H H110'
-						elif any(s in sku_check for s in (' 6A 00 01 80 00 ',' 02 D1 02 6A ')) : fit_platform = 'PCH-H QM170'
-						elif any(s in sku_check for s in (' 6B 00 01 80 00 ',' 02 D1 02 6B ')) : fit_platform = 'PCH-H HM170'
-						elif any(s in sku_check for s in (' 6C 00 01 80 00 ',' 02 D1 02 6C ')) : fit_platform = 'PCH-H No Emulation SKL'
-						elif any(s in sku_check for s in (' 6D 00 01 80 00 ',' 02 D1 02 6D ')) : fit_platform = 'PCH-H C236'
-						elif any(s in sku_check for s in (' 6E 00 01 80 00 ',' 02 D1 02 6E ')) : fit_platform = 'PCH-H CM236'
-						elif any(s in sku_check for s in (' 6F 00 01 80 00 ',' 02 D1 02 6F ')) : fit_platform = 'PCH-H C232'
-						elif any(s in sku_check for s in (' 70 00 01 80 00 ',' 02 D1 02 70 ')) : fit_platform = 'PCH-H QMS180'
-						elif any(s in sku_check for s in (' 71 00 01 80 00 ',' 02 D1 02 71 ')) : fit_platform = 'PCH-H QMS185'
-						elif any(s in sku_check for s in (' 90 01 04 80 00 ',' 02 D1 02 90 ')) : fit_platform = 'PCH-H No Emulation BSF'
-						elif any(s in sku_check for s in (' 91 01 04 80 00 ',' 91 01 03 80 00 ',' 02 D1 02 91 ')) : fit_platform = 'PCH-H C422' # moved at 11.7
-						elif any(s in sku_check for s in (' 92 01 04 80 00 ',' 92 01 03 80 00 ',' 02 D1 02 92 ')) : fit_platform = 'PCH-H X299' # moved at 11.7
-						elif any(s in sku_check for s in (' 93 01 01 80 00 ',' 02 D1 02 93 ')) : fit_platform = 'PCH-H QM175'
-						elif any(s in sku_check for s in (' 94 01 01 80 00 ',' 02 D1 02 94 ')) : fit_platform = 'PCH-H HM175'
-						elif any(s in sku_check for s in (' 95 01 01 80 00 ',' 02 D1 02 95 ')) : fit_platform = 'PCH-H CM238'
-						elif any(s in sku_check for s in (' C8 00 02 80 00 ',' 04 11 06 C8 ')) : fit_platform = 'PCH-H C621'
-						elif any(s in sku_check for s in (' C9 00 02 80 00 ',' 04 11 06 C9 ')) : fit_platform = 'PCH-H C622'
-						elif any(s in sku_check for s in (' CA 00 02 80 00 ',' 04 11 06 CA ')) : fit_platform = 'PCH-H C624'
-						elif any(s in sku_check for s in (' CB 00 02 80 00 ',' 04 11 06 CB ')) : fit_platform = 'PCH-H No Emulation LBG'
-						elif any(s in sku_check for s in (' F4 01 05 80 00 ',' 02 D1 02 F4 ')) : fit_platform = 'PCH-H No Emulation Z370'
-						elif any(s in sku_check for s in (' F5 01 05 80 00 ',' 02 D1 02 F5 ')) : fit_platform = 'PCH-H Z370'
-						elif any(s in sku_check for s in (' 01 00 00 80 00 ',' 02 B0 02 01 ',' 02 D0 02 01 ')) : fit_platform = 'PCH-LP Premium U SKL'
-						elif any(s in sku_check for s in (' 02 00 00 80 00 ',' 02 B0 02 02 ',' 02 D0 02 02 ')) : fit_platform = 'PCH-LP Premium Y SKL'
-						elif any(s in sku_check for s in (' 03 00 00 80 00 ',' 02 B0 02 03 ',' 02 D0 02 03 ')) : fit_platform = 'PCH-LP No Emulation'
-						elif any(s in sku_check for s in (' 04 00 00 80 00 ',' 02 B0 02 04 ',' 02 D0 02 04 ')) : fit_platform = 'PCH-LP Base U KBL'
-						elif any(s in sku_check for s in (' 05 00 00 80 00 ',' 02 B0 02 05 ',' 02 D0 02 05 ')) : fit_platform = 'PCH-LP Premium U KBL'
-						elif any(s in sku_check for s in (' 06 00 00 80 00 ',' 02 B0 02 06 ',' 02 D0 02 06 ')) : fit_platform = 'PCH-LP Premium Y KBL'
-						elif any(s in sku_check for s in (' 07 00 00 80 00 ',' 02 B0 02 07 ',' 02 D0 02 07 ')) : fit_platform = 'PCH-LP Base U KBL-R'
-						elif any(s in sku_check for s in (' 08 00 00 80 00 ',' 02 B0 02 08 ',' 02 D0 02 08 ')) : fit_platform = 'PCH-LP Premium U KBL-R'
-						elif any(s in sku_check for s in (' 09 00 00 80 00 ',' 02 B0 02 09 ',' 02 D0 02 09 ')) : fit_platform = 'PCH-LP Premium Y KBL-R'
-						elif any(s in sku_check for s in (' 02 B0 02 00 ',' 02 D0 02 00 ')) : fit_platform = 'PCH-LP Base U SKL' # last, weak pattern
-						elif me11_sku_ranges :
-							(start_sku_match, end_sku_match) = me11_sku_ranges[-1] # Take last SKU range
-							sku_check = krod_fit_sku(start_sku_match) # Store the new SKU check bytes
-							me11_sku_ranges.pop(-1) # Remove last SKU range
-							continue # Invoke while, check fit_platform in new sku_check
-						else : break # Could not find FIT SKU at any KROD
+				# FIT Platform detection for CSME 11
+				fit_platform = fit_11_plat(sku_check, fit_platform, me11_sku_ranges)
 				
 				if '-LP' in fit_platform : pos_sku_fit = 'LP'
 				elif '-H' in fit_platform : pos_sku_fit = 'H'
@@ -5702,7 +5711,7 @@ for file_in in source :
 					if (release == 'Production' and (minor == 0 and (hotfix > 0 or (hotfix == 0 and build >= 1158)))) or 20 > minor > 0 :
 						if sku_result == 'LP' : sku_stp = 'C0'
 						elif sku_result == 'H' : sku_stp = 'D0'
-					elif release == 'Production' and minor == 20 and ' H' in sku : sku_stp = 'B0-S0' # PRD Bx/Sx (C620 Datasheet, 1.6 PCH Markings)
+					elif release == 'Production' and minor in [20,21] and ' H' in sku : sku_stp = 'B0-S0' # PRD Bx/Sx (C620 Datasheet, 1.6 PCH Markings)
 				
 				sku_db, upd_found = sku_db_upd_cse(sku_init_db, sku_result, sku_stp, upd_found, False) # Store DB SKU and check Latest version
 				
@@ -5734,7 +5743,7 @@ for file_in in source :
 				
 				# Power Down Mitigation (PDM) is a SPT-LP C0 erratum, first fixed at ~11.0.0.1183
 				# Hardcoded in FTPR > BUP, decompression required to detect NPDM/YPDM via pattern
-				# Hard-fixed at KBP-LP A0 but 11.6-7 have PDM firmware for KBL-upgraded SPT-LP C0
+				# Hard-fixed at KBP-LP A0 but 11.6-8 have PDM firmware for KBL-upgraded SPT-LP C0
 				if sku_result == 'H' :
 					pdm_status = 'NaN' # LP-only
 				else :
@@ -5937,17 +5946,17 @@ for file_in in source :
 			
 			if major == 3 :
 				
-				if minor in [0,2] : # Simultaneous branches, 2 is "Slim"
+				if minor in [0,1,2,3] : # Simultaneous branches, 2-3 are "Slim"
 					db_maj,db_min,db_hot,db_bld = check_upd('Latest_%s_%s%s' % (variant, major, minor))
 					if hotfix < db_hot or (hotfix == db_hot and build < db_bld) : upd_found = True
 					
 					# Adjust SoC Stepping if not from DB
-					if minor == 0 :
-						if sku_stp == 'NaN' :
-							if release == 'Production' : sku_stp = 'Bx' # PRD
-							else : sku_stp = 'Ax' # PRE, BYP
-						elif minor == 2 and sku_stp == 'NaN' :
-							if release == 'Production' : sku_stp = 'Cx' # PRD (Joule_C0-X64-Release)
+					if minor in [0,1] and sku_stp == 'NaN' :
+						if release == 'Production' : sku_stp = 'Bx' # PRD
+						else : sku_stp = 'Ax' # PRE, BYP
+					elif minor in [2,3] and sku_stp == 'NaN' :
+						if release == 'Production' : sku_stp = 'Cx' # PRD (Joule_C0-X64-Release)
+						#else : sku_stp = 'Bx' # PRE, BYP (Joule_C0-X64-Release)
 					
 				platform = 'APL'
 				
@@ -6175,7 +6184,7 @@ for file_in in source :
 					print('FITC Ver: %s' % fw_ver(fitc_major,fitc_minor,fitc_hotfix,fitc_build))
 			
 			if fit_platform != 'NaN' :
-				if [variant,major] == ['CSME',11] : print("FIT SKU:  %s" % fit_platform)
+				if (variant,major) in [('CSME',11)] : print('FIT SKU:  %s' % fit_platform)
 			
 			if rgn_exist :
 				if major ==6 and release == "ROM-Bypass" : print('Size:     Unknown')
